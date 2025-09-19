@@ -2,7 +2,7 @@
 """
 Port scanner simple, multithreadé.
 Usage:
-    python port_scanner.py target_or_ip start_port end_port --threads 100 --timeout 1.0 --output results.csv
+    py port-scanner.py target_or_ip start_port end_port --threads 100 --timeout 1.0 --output results.csv [--verbose]
 """
 import socket
 import sys
@@ -12,6 +12,10 @@ import argparse
 from datetime import datetime
 
 def scan_port(target, port, timeout):
+    """
+    Tente une connexion TCP. Retourne (port, is_open, banner).
+    Ne fait pas d'affichage ici : on laisse le caller imprimer (thread-safe enough).
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
@@ -27,6 +31,7 @@ def scan_port(target, port, timeout):
             s.close()
             return (port, False, "")
     except Exception:
+        # si erreur réseau ponctuelle, considérer comme fermé
         return (port, False, "")
 
 def main():
@@ -37,6 +42,7 @@ def main():
     parser.add_argument("--threads", type=int, default=100, help="Number of threads")
     parser.add_argument("--timeout", type=float, default=0.8, help="Socket timeout seconds")
     parser.add_argument("--output", type=str, default="", help="CSV output file (optional)")
+    parser.add_argument("--verbose", action="store_true", help="Show every port tested (open or closed)")
     args = parser.parse_args()
 
     target = args.target
@@ -44,6 +50,7 @@ def main():
     end = min(65535, args.end)
     timeout = args.timeout
     threads = max(1, min(1000, args.threads))
+    verbose = args.verbose
 
     ports = list(range(start, end+1))
     open_ports = []
@@ -51,13 +58,19 @@ def main():
     print(f"[+] Scanning {target} ports {start}-{end} with {threads} threads, timeout {timeout}s")
     start_time = datetime.now()
 
+    # soumettre toutes les tâches
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(scan_port, target, p, timeout): p for p in ports}
         for fut in as_completed(futures):
             port, is_open, banner = fut.result()
             if is_open:
+                # affiche toujours les ports ouverts
                 print(f"[OPEN] {port}\t{banner}")
                 open_ports.append((port, banner))
+            else:
+                # n'affiche que si verbose activé
+                if verbose:
+                    print(f"[CLOSED] {port}")
 
     elapsed = datetime.now() - start_time
     print(f"[+] Done in {elapsed.total_seconds():.2f}s. {len(open_ports)} open ports found.")
